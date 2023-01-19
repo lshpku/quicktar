@@ -4,14 +4,14 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	ctr "github.com/lshpku/quicktar"
 	"golang.org/x/net/webdav"
 )
 
-var mu sync.Mutex
+var diskReadBytes uint64
 
 type FS struct {
 	root *File
@@ -131,7 +131,9 @@ func (f *FileDesc) Read(p []byte) (n int, err error) {
 	if err = f.init(); err != nil {
 		return
 	}
-	return f.fd.Read(p)
+	n, err = f.fd.Read(p)
+	atomic.AddUint64(&diskReadBytes, uint64(n))
+	return
 }
 
 func (f *FileDesc) Write(p []byte) (n int, err error) {

@@ -1,11 +1,14 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
+	"sync/atomic"
 
 	ctr "github.com/lshpku/quicktar"
 	"golang.org/x/net/webdav"
@@ -16,6 +19,9 @@ var (
 	flagPwd  = flag.String("pwd", "", "Specify password")
 	flagEnc  = flag.Int("enc", 0, "Specify encryption level")
 )
+
+//go:embed index.html
+var indexFile []byte
 
 func main() {
 	root := NewFile()
@@ -76,6 +82,7 @@ type Handler struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Wrap writer
 	rw := &ResponseWriter{
 		ResponseWriter: w,
 		method:         r.Method,
@@ -85,7 +92,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		rw.url = url
 	}
-	log.Println(rw.method, rw.url)
+
+	// Route webdav and web requests
+	if r.Method == "GET" {
+		switch url {
+		case "/":
+			rw.Write(indexFile)
+			return
+		case "/-/diskReadBytes":
+			val := atomic.LoadUint64(&diskReadBytes)
+			str := strconv.FormatUint(val, 10)
+			rw.Write([]byte(str))
+			return
+		}
+	}
+
 	h.Handler.ServeHTTP(rw, r)
 }
 

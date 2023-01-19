@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Welcome to nginx!</title>
+    <style>
+    </style>
+</head>
+
+<body>
+    <h3>QuickTar WebDAV Server</h3>
+    <p id="diskReadBytes"></p>
+
+    <script src="https://apps.bdimg.com/libs/jquery/2.1.4/jquery.min.js"></script>
+    <script>
+        var lastByte = 0;
+        var lastTime = Date.now();
+
+        let unit = "BKMGT";
+
+        function formatSize(v) {
+            var i = 0;
+            for (; i < unit.length - 1 && v > 1000; i++) {
+                v /= 1000;
+            }
+            return v.toFixed(2) + " " + unit[i] + "/s";
+        }
+
+        function update() {
+            $.ajax({
+                url: '/-/diskReadBytes',
+                success: (data) => {
+                    var byte = parseInt(data);
+                    var time = Date.now();
+                    var rate = (byte - lastByte) / (time - lastTime) * 1000;
+                    lastByte = byte;
+                    lastTime = time;
+                    $("#diskReadBytes").text(formatSize(rate));
+                    setTimeout(update, 1000);
+                },
+                error: (data) => {
+                    $("#diskReadBytes").text('error');
+                    setTimeout(update, 1000)
+                }
+            })
+        }
+
+        $(document).ready(update)
+    </script>
+</body>
+
+</html>
