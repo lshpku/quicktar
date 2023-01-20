@@ -4,10 +4,12 @@ import (
 	_ "embed"
 	"flag"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 
 	ctr "github.com/lshpku/quicktar"
@@ -25,6 +27,9 @@ var indexFile []byte
 
 func main() {
 	root := NewFile()
+
+	ctr.OpenFunc = acquireFile
+	ctr.CloseFunc = releaseFile
 
 	// Parse flag
 	flag.Parse()
@@ -120,4 +125,53 @@ func (w *ResponseWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 	text := http.StatusText(statusCode)
 	log.Println(w.method, w.url, statusCode, text)
+}
+
+var (
+	filePoolMu  = sync.Mutex{}
+	fileNameMap = map[string][]*os.File{}
+	fileDescMap = map[*os.File]string{}
+)
+
+func acquireFile(name string) (*os.File, error) {
+	filePoolMu.Lock()
+	defer filePoolMu.Unlock()
+
+	list, ok := fileNameMap[name]
+	if !ok {
+		list = make([]*os.File, 0)
+		fileNameMap[name] = list
+	}
+
+	// Select a random fd
+	if len(list) > 0 {
+		i := rand.Intn(len(list))
+		f := list[i]
+		list[i] = list[len(list)-1]
+		fileNameMap[name] = list[:len(list)-1]
+		return f, nil
+	}
+
+	// Open a new fd
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	fileDescMap[f] = name
+	return f, nil
+}
+
+func releaseFile(f *os.File) error {
+	filePoolMu.Lock()
+	defer filePoolMu.Unlock()
+
+	name := fileDescMap[f]
+	list := fileNameMap[name]
+
+	if len(list) >= 4 {
+		delete(fileDescMap, f)
+		return f.Close()
+	}
+	fileNameMap[name] = append(list, f)
+	return nil
 }

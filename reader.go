@@ -16,13 +16,16 @@ type Reader struct {
 	name string
 }
 
+var OpenFunc = os.Open
+var CloseFunc = func(f *os.File) error { return f.Close() }
+
 func OpenReader(name string, cipher Cipher) (*Reader, error) {
 	// Open file
-	fd, err := os.Open(name)
+	fd, err := OpenFunc(name)
 	if err != nil {
 		return nil, err
 	}
-	defer fd.Close()
+	defer CloseFunc(fd)
 	fi, err := fd.Stat()
 	if err != nil {
 		return nil, err
@@ -90,7 +93,7 @@ func OpenReader(name string, cipher Cipher) (*Reader, error) {
 }
 
 func (r *Reader) Open(f *File) (*FileDesc, error) {
-	fd, err := os.Open(r.name)
+	fd, err := OpenFunc(r.name)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +185,7 @@ func (f *FileDesc) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (f *FileDesc) Close() error {
-	return f.fd.Close()
+	return CloseFunc(f.fd)
 }
 
 func (f *FileDesc) Stat() (fs.FileInfo, error) {
