@@ -2,11 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 
 	ctr "github.com/lshpku/quicktar"
@@ -151,101 +147,13 @@ func main() {
 		cpr = ctr.NewCipher(level, []byte(*password))
 	}
 
-	// Create archive
-	if mode == "c" || mode == "create" {
-		w, err := ctr.NewWriter(*archive, cpr)
-		if err != nil {
-			fatal(err.Error())
-		}
-		defer w.Close()
-
-		visit := func(path string, fi fs.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-
-			// Filter file
-			mode := fi.Mode() & fs.ModeType
-			if mode != 0 && mode != fs.ModeDir {
-				return nil
-			}
-			baseName := ctr.BaseName(path)
-			if baseName == ".DS_Store" {
-				return nil
-			}
-			if strings.HasPrefix(baseName, "._") {
-				return nil
-			}
-
-			if verbose {
-				name := path
-				if fi.IsDir() {
-					name += "/"
-				}
-				fmt.Println(name)
-			}
-
-			// Create entry in archive
-			w, err := w.CreateFile(path, fi.Mode(), fi.ModTime())
-			if err != nil {
-				return err
-			}
-			defer w.Close()
-
-			if fi.IsDir() {
-				return nil
-			}
-
-			// Copy content
-			r, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer r.Close()
-
-			_, err = io.Copy(w, r)
-			return err
-		}
-
-		for _, root := range files {
-			err := filepath.Walk(root, visit)
-			if err != nil {
-				fatal(err.Error())
-			}
-		}
-	}
-
-	// Extract archive
-	if mode == "x" || mode == "extract" {
+	// Apply operation
+	switch mode {
+	case "c", "create":
+		create(*archive, cpr, verbose, files)
+	case "x", "extract":
 		fatal("not implemented")
-	}
-
-	// List archive
-	if mode == "t" || mode == "list" {
-		r, err := ctr.OpenReader(*archive, cpr)
-		if err != nil {
-			fatal(err.Error())
-		}
-		maxSize := int64(0)
-		for _, f := range r.File {
-			if f.Size() > maxSize {
-				maxSize = f.Size()
-			}
-		}
-		sizeLen := len(strconv.FormatInt(maxSize, 10))
-
-		for _, f := range r.File {
-			name := f.Name
-			if f.IsDir() {
-				name += "/"
-			}
-			if !verbose {
-				fmt.Println(name)
-				continue
-			}
-			mode := f.Mode().String()
-			modified := f.ModTime().Format("2006/01/02 15:04")
-			fmt.Printf("%s %*d %s %s\n", mode, sizeLen, f.Size(), modified, name)
-		}
+	case "t", "list":
+		list(*archive, cpr, verbose)
 	}
 }
