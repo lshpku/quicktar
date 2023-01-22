@@ -12,6 +12,7 @@ import (
 )
 
 func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append bool) {
+	// Open writer
 	var w *ctr.Writer
 	var err error
 	if append {
@@ -22,11 +23,11 @@ func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append
 	if err != nil {
 		fatal(err.Error())
 	}
-	defer w.Close()
 
+	// Define traversal function
 	visit := func(path string, fi fs.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 
 		// Filter file
@@ -72,10 +73,34 @@ func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append
 		return err
 	}
 
+	// Traverse files
 	for _, root := range files {
-		err := filepath.Walk(root, visit)
+		var fi fs.FileInfo
+		fi, err = os.Stat(root)
 		if err != nil {
-			fatal(err.Error())
+			break
 		}
+		if fi.IsDir() {
+			lastChar := rune(0)
+			for _, c := range root {
+				lastChar = c
+			}
+			if lastChar == '/' {
+				root = root[:len(root)-1]
+			}
+		}
+		err = filepath.Walk(root, visit)
+		if err != nil {
+			break
+		}
+	}
+
+	// Close the file before raising any error, so that the archive is closed properly.
+	closeErr := w.Close()
+	if err != nil {
+		fatal(err.Error())
+	}
+	if closeErr != nil {
+		fatal(closeErr.Error())
 	}
 }
