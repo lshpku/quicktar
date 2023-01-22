@@ -35,6 +35,38 @@ func NewWriter(name string, cipher Cipher) (*Writer, error) {
 	return w, nil
 }
 
+// OpenWriter opens an existing archive for append.
+func OpenWriter(name string, cipher Cipher) (*Writer, error) {
+	f, err := os.OpenFile(name, os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+	var metaOff int64
+	files, err := readHeader(f, cipher, &metaOff)
+	if err != nil {
+		return nil, err
+	}
+	_, err = f.Seek(metaOff, io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+	w := &Writer{
+		Cipher:    cipher,
+		fd:        f,
+		file:      make([]*fileHeader, 0),
+		fileIndex: make(map[string]int),
+		pos:       metaOff,
+		buf:       make([]byte, 0),
+	}
+	for _, f := range files {
+		h := f.fileHeader
+		h.name = f.Name
+		w.fileIndex[f.Name] = len(w.file)
+		w.file = append(w.file, &h)
+	}
+	return w, nil
+}
+
 // Create provides easy access to CreateFile.
 // The name follows the same constraints as CreateFile. However, to create
 // a directory instead of a file, add a trailing slash to the name.

@@ -11,8 +11,14 @@ import (
 	ctr "github.com/lshpku/quicktar"
 )
 
-func create(archive string, cpr ctr.Cipher, verbose bool, files []string) {
-	w, err := ctr.NewWriter(archive, cpr)
+func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append bool) {
+	var w *ctr.Writer
+	var err error
+	if append {
+		w, err = ctr.OpenWriter(archive, cpr)
+	} else {
+		w, err = ctr.NewWriter(archive, cpr)
+	}
 	if err != nil {
 		fatal(err.Error())
 	}

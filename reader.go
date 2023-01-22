@@ -19,20 +19,35 @@ type Reader struct {
 var OpenFunc = os.Open
 var CloseFunc = func(f *os.File) error { return f.Close() }
 
+// OpenReader opens the archive for read.
 func OpenReader(name string, cipher Cipher) (*Reader, error) {
-	// Open file
 	fd, err := OpenFunc(name)
 	if err != nil {
 		return nil, err
 	}
 	defer CloseFunc(fd)
+
+	files, err := readHeader(fd, cipher, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	reader := &Reader{
+		Cipher: cipher,
+		File:   files,
+		name:   name,
+	}
+	return reader, nil
+}
+
+func readHeader(fd *os.File, cipher Cipher, metaOff *int64) ([]*File, error) {
+	// Read last block
 	fi, err := fd.Stat()
 	if err != nil {
 		return nil, err
 	}
 	size := fi.Size()
 
-	// Read last block
 	buf := make([]byte, 32)
 	_, err = fd.ReadAt(buf, size-32)
 	if err != nil && err != io.EOF {
@@ -42,16 +57,21 @@ func OpenReader(name string, cipher Cipher) (*Reader, error) {
 	if binary.LittleEndian.Uint64(buf[24:]) != 0 {
 		return nil, errors.New("reserved fields should be zero")
 	}
-	metaOff := int64(binary.LittleEndian.Uint64(buf)) / 32 * 32
+
+	off := int64(binary.LittleEndian.Uint64(buf))
 	count := int(binary.LittleEndian.Uint64(buf[8:]))
+	if metaOff != nil {
+		*metaOff = off
+	}
 
 	// Read file headers except names
-	buf = make([]byte, size-32-metaOff)
-	_, err = fd.ReadAt(buf, metaOff)
+	buf = make([]byte, size-32-off)
+	_, err = fd.ReadAt(buf, off)
 	if err != nil {
 		return nil, err
 	}
-	cipher.xorKeyStream(buf, buf, metaOff)
+	cipher.xorKeyStream(buf, buf, off)
+
 	files := make([]*File, count)
 	for i := 0; i < count; i++ {
 		offset := binary.LittleEndian.Uint64(buf)
@@ -84,12 +104,7 @@ func OpenReader(name string, cipher Cipher) (*Reader, error) {
 		buf = buf[j+1:]
 	}
 
-	reader := &Reader{
-		Cipher: cipher,
-		File:   files,
-		name:   name,
-	}
-	return reader, nil
+	return files, nil
 }
 
 func (r *Reader) Open(f *File) (*FileDesc, error) {

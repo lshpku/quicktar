@@ -11,7 +11,8 @@ import (
 var helpMsg = `
 Options:
     -h, --help            Print this help and exit.
-    -c, --create          Create a new archive.
+	-c, --create          Create a new archive.
+	-a, --append          Append to an existing archive.
     -x, --extract         Extract the archive.
     -t, --list            List files in the archive.
     -f, --file <str>      Set the archive file.
@@ -70,7 +71,7 @@ func main() {
 			switch arg[2:] {
 			case "help":
 				printHelpAndExit()
-			case "create", "extract", "list":
+			case "create", "append", "extract", "list":
 				if mode != "" {
 					fatalWithUsage("ambiguous operation")
 				}
@@ -94,7 +95,7 @@ func main() {
 				switch arg[j : j+1] {
 				case "h":
 					printHelpAndExit()
-				case "c", "x", "t":
+				case "c", "a", "x", "t":
 					if mode != "" {
 						fatalWithUsage("ambiguous operation")
 					}
@@ -150,7 +151,9 @@ func main() {
 	// Apply operation
 	switch mode {
 	case "c", "create":
-		create(*archive, cpr, verbose, files)
+		create(*archive, cpr, verbose, files, false)
+	case "a", "append":
+		create(*archive, cpr, verbose, files, true)
 	case "x", "extract":
 		fatal("not implemented")
 	case "t", "list":
