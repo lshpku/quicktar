@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	ctr "github.com/lshpku/quicktar"
 	"golang.org/x/net/webdav"
@@ -26,11 +27,6 @@ var (
 var indexFile []byte
 
 func main() {
-	root := NewFile()
-
-	ctr.OpenFunc = acquireFile
-	ctr.CloseFunc = releaseFile
-
 	// Parse flag
 	flag.Parse()
 
@@ -39,6 +35,12 @@ func main() {
 		os.Exit(-1)
 	}
 	cpr := ctr.NewCipher(*flagEnc, []byte(*flagPwd))
+
+	ctr.OpenFunc = acquireFile
+	ctr.CloseFunc = releaseFile
+	go closeFdLoop()
+
+	root := NewFile()
 
 	// Open files
 	for _, name := range flag.Args() {
@@ -129,8 +131,9 @@ func (w *ResponseWriter) WriteHeader(statusCode int) {
 
 var (
 	filePoolMu  = sync.Mutex{}
-	fileNameMap = map[string][]*os.File{}
-	fileDescMap = map[*os.File]string{}
+	fileNameMap = map[string][]*os.File{}  // unused
+	fileDescMap = map[*os.File]string{}    // all
+	lastUseTime = map[*os.File]time.Time{} // unused
 )
 
 func acquireFile(name string) (*os.File, error) {
@@ -149,6 +152,7 @@ func acquireFile(name string) (*os.File, error) {
 		f := list[i]
 		list[i] = list[len(list)-1]
 		fileNameMap[name] = list[:len(list)-1]
+		delete(lastUseTime, f)
 		return f, nil
 	}
 
@@ -170,8 +174,34 @@ func releaseFile(f *os.File) error {
 
 	if len(list) >= 4 {
 		delete(fileDescMap, f)
-		return f.Close()
+		go f.Close()
+		return nil
 	}
+
 	fileNameMap[name] = append(list, f)
+	lastUseTime[f] = time.Now()
 	return nil
+}
+
+func closeFdLoop() {
+	for {
+		filePoolMu.Lock()
+		now := time.Now()
+		for name, list := range fileNameMap {
+			for i := 0; i < len(list); i++ {
+				f := list[i]
+				if now.Sub(lastUseTime[f]) < 1*time.Minute {
+					continue
+				}
+				go list[i].Close()
+				list[i] = list[len(list)-1]
+				list = list[:len(list)-1]
+				delete(fileDescMap, f)
+				delete(lastUseTime, f)
+			}
+			fileNameMap[name] = list
+		}
+		filePoolMu.Unlock()
+		time.Sleep(5 * time.Second)
+	}
 }
