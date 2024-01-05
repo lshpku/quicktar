@@ -4,14 +4,11 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"sync/atomic"
 	"time"
 
 	ctr "github.com/lshpku/quicktar"
 	"golang.org/x/net/webdav"
 )
-
-var diskReadBytes uint64
 
 type FS struct {
 	root *File
@@ -132,7 +129,6 @@ func (f *FileDesc) Read(p []byte) (n int, err error) {
 		return
 	}
 	n, err = f.fd.Read(p)
-	atomic.AddUint64(&diskReadBytes, uint64(n))
 	return
 }
 

@@ -1,16 +1,12 @@
 package main
 
 import (
-	_ "embed"
 	"flag"
 	"log"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	ctr "github.com/lshpku/quicktar"
@@ -22,9 +18,6 @@ var (
 	flagPwd  = flag.String("pwd", "", "Specify password")
 	flagEnc  = flag.Int("enc", 0, "Specify encryption level")
 )
-
-//go:embed index.html
-var indexFile []byte
 
 func main() {
 	// Parse flag
@@ -70,9 +63,8 @@ func main() {
 	}
 
 	// Start server
-	log.Println("listen on :20080")
-
-	err := http.ListenAndServe(":20080", &Handler{
+	log.Println("listen on", *flagAddr)
+	err := http.ListenAndServe(*flagAddr, &httpHandler{
 		webdav.Handler{
 			FileSystem: &FS{
 				root: root,
@@ -80,53 +72,7 @@ func main() {
 			LockSystem: webdav.NewMemLS(),
 		},
 	})
-
 	log.Fatal(err)
-}
-
-type Handler struct {
-	webdav.Handler
-}
-
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Wrap writer
-	rw := &ResponseWriter{
-		ResponseWriter: w,
-		method:         r.Method,
-		url:            r.URL.String(),
-	}
-	url, err := url.QueryUnescape(rw.url)
-	if err == nil {
-		rw.url = url
-	}
-
-	// Route webdav and web requests
-	if r.Method == "GET" {
-		switch url {
-		case "/":
-			rw.Write(indexFile)
-			return
-		case "/-/diskReadBytes":
-			val := atomic.LoadUint64(&diskReadBytes)
-			str := strconv.FormatUint(val, 10)
-			rw.Write([]byte(str))
-			return
-		}
-	}
-
-	h.Handler.ServeHTTP(rw, r)
-}
-
-type ResponseWriter struct {
-	http.ResponseWriter
-	method string
-	url    string
-}
-
-func (w *ResponseWriter) WriteHeader(statusCode int) {
-	w.ResponseWriter.WriteHeader(statusCode)
-	text := http.StatusText(statusCode)
-	log.Println(w.method, w.url, statusCode, text)
 }
 
 var (
@@ -172,7 +118,7 @@ func releaseFile(f *os.File) error {
 	name := fileDescMap[f]
 	list := fileNameMap[name]
 
-	if len(list) >= 4 {
+	if len(list) >= 16 {
 		delete(fileDescMap, f)
 		go f.Close()
 		return nil
