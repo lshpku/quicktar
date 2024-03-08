@@ -27,7 +27,7 @@ func OpenReader(name string, cipher Cipher) (*Reader, error) {
 	}
 	defer CloseFunc(fd)
 
-	files, err := readHeader(fd, cipher, nil)
+	files, err := readMeta(fd, &cipher, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +38,88 @@ func OpenReader(name string, cipher Cipher) (*Reader, error) {
 		name:   name,
 	}
 	return reader, nil
+}
+
+// readMeta reads the meta part of fd.
+// metaOff is the offset of meta, where you can append from.
+// The nonce in cipher will be updated.
+func readMeta(fd *os.File, cipher *Cipher, metaOff *int64) ([]*File, error) {
+	// Read header
+	buf := make([]byte, 32)
+	if _, err := fd.Read(buf); err != nil {
+		return nil, err
+	}
+	if string(buf[:8]) != "QuickTar" {
+		if metaOff != nil {
+			return nil, errors.New("bad magic")
+		}
+		// Deprecated, read-only
+		println("warning: bad magic, fallback to older format")
+		cipher.nonce = []uint64{binary.BigEndian.Uint64(deprecatedNonce), 0}
+		return readHeader(fd, *cipher, nil)
+	}
+	metaEnd := int64(binary.LittleEndian.Uint64(buf[8:]))
+	if cipher.block != nil {
+		cipher.nonce = []uint64{
+			binary.BigEndian.Uint64(buf[16:]),
+			binary.BigEndian.Uint64(buf[24:]),
+		}
+	}
+
+	// Read the final block
+	if _, err := fd.ReadAt(buf, metaEnd-32); err != nil {
+		return nil, err
+	}
+	cipher.xorKeyStream(buf, buf, metaEnd-32)
+	if binary.LittleEndian.Uint64(buf[24:]) != 0 {
+		return nil, errors.New("wrong password")
+	}
+	metaSize := int64(binary.LittleEndian.Uint64(buf))
+	count := int(binary.LittleEndian.Uint64(buf[8:]))
+	metaStart := metaEnd - metaSize
+	if metaOff != nil {
+		*metaOff = metaStart
+	}
+
+	// Read file metadata
+	buf = make([]byte, metaSize-32)
+	if _, err := fd.ReadAt(buf, metaStart); err != nil {
+		return nil, err
+	}
+	cipher.xorKeyStream(buf, buf, metaStart)
+	files := make([]*File, count)
+	for i := 0; i < count; i++ {
+		offset := binary.LittleEndian.Uint64(buf)
+		size := binary.LittleEndian.Uint64(buf[8:])
+		mode := binary.LittleEndian.Uint32(buf[16:])
+		nsec := binary.LittleEndian.Uint32(buf[20:])
+		sec := binary.LittleEndian.Uint64(buf[24:])
+		files[i] = &File{
+			fileHeader: fileHeader{
+				offset:   int64(offset),
+				size:     int64(size),
+				mode:     fs.FileMode(mode),
+				modified: time.Unix(int64(sec), int64(nsec)),
+			},
+		}
+		buf = buf[32:]
+	}
+
+	// Read file names
+	for i := 0; i < count && len(buf) > 0; i++ {
+		j := 0
+		for j < len(buf) && buf[j] != 0 {
+			j++
+		}
+		if j == len(buf) {
+			return nil, errors.New("missing file names")
+		}
+		files[i].Name = string(buf[:j])
+		files[i].fileHeader.name = BaseName(files[i].Name)
+		buf = buf[j+1:]
+	}
+
+	return files, nil
 }
 
 func readHeader(fd *os.File, cipher Cipher, metaOff *int64) ([]*File, error) {

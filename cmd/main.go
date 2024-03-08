@@ -30,24 +30,27 @@ func printHelpAndExit() {
 func fatalWithUsage(msg string) {
 	println(msg)
 	println("Type '" + os.Args[0] + " -h' for more help.")
-	os.Exit(-1)
+	os.Exit(1)
 }
 
 func fatal(msg string) {
 	println(msg)
-	os.Exit(-1)
+	os.Exit(1)
 }
 
-func main() {
-	mode := ""
-	archive := (*string)(nil)
-	verbose := false
-	level := 0
-	password := (*string)(nil)
-	files := make([]string, 0)
+var (
+	flagMode    string
+	flagPath    *string
+	flagVerbose bool
+	flagEnc     int
+	flagPwd     []byte
+	flagFiles   = make([]string, 0)
+)
 
+func main() {
 	// Helper functions for parsing arguments
 	i := 1
+	var pwd *string
 	argc := len(os.Args)
 	shift := func(name string) string {
 		if i+1 == argc {
@@ -72,16 +75,16 @@ func main() {
 			case "help":
 				printHelpAndExit()
 			case "create", "append", "extract", "list":
-				if mode != "" {
+				if flagMode != "" {
 					fatalWithUsage("ambiguous operation")
 				}
-				mode = arg[2:]
+				flagMode = arg[2:]
 			case "file":
-				archive = once(archive, shift(arg), "file")
+				flagPath = once(flagPath, shift(arg), "file")
 			case "verbose":
-				verbose = true
+				flagVerbose = true
 			case "password":
-				password = once(password, shift(arg), "password")
+				pwd = once(pwd, shift(arg), "password")
 			default:
 				fatalWithUsage("unknown option: " + arg)
 			}
@@ -96,29 +99,29 @@ func main() {
 				case "h":
 					printHelpAndExit()
 				case "c", "a", "x", "t":
-					if mode != "" {
+					if flagMode != "" {
 						fatalWithUsage("ambiguous operation")
 					}
-					mode = arg[j : j+1]
+					flagMode = arg[j : j+1]
 				case "1", "2", "3":
-					if level != 0 {
+					if flagEnc != 0 {
 						fatalWithUsage("ambiguous level")
 					}
-					level = int(arg[j]) - '0'
+					flagEnc = int(arg[j]) - '0'
 				case "v":
-					verbose = true
+					flagVerbose = true
 				case "f":
 					if j+1 == nargs {
-						archive = once(archive, shift("-f"), "file")
+						flagPath = once(flagPath, shift("-f"), "file")
 					} else {
-						archive = once(archive, arg[j+1:], "file")
+						flagPath = once(flagPath, arg[j+1:], "file")
 						j = nargs
 					}
 				case "p":
 					if j+1 == nargs {
-						password = once(password, shift("-p"), "password")
+						pwd = once(pwd, shift("-p"), "password")
 					} else {
-						password = once(password, arg[j+1:], "password")
+						pwd = once(pwd, arg[j+1:], "password")
 						j = nargs
 					}
 				default:
@@ -129,34 +132,33 @@ func main() {
 		}
 
 		// Standalone arguments
-		files = append(files, arg)
+		flagFiles = append(flagFiles, arg)
 	}
 
 	// Check options
-	if mode == "" {
+	if flagMode == "" {
 		fatalWithUsage("requires operation")
 	}
-	if archive == nil {
+	if flagPath == nil {
 		fatalWithUsage("requires archive")
 	}
 
-	cpr := ctr.Store
-	if level != 0 {
-		if password == nil {
+	if flagEnc != ctr.EncNone {
+		if pwd == nil {
 			fatalWithUsage("requires password on encryption")
 		}
-		cpr = ctr.NewCipher(level, []byte(*password))
+		flagPwd = []byte(*pwd)
 	}
 
 	// Apply operation
-	switch mode {
+	switch flagMode {
 	case "c", "create":
-		create(*archive, cpr, verbose, files, false)
+		create(false)
 	case "a", "append":
-		create(*archive, cpr, verbose, files, true)
+		create(true)
 	case "x", "extract":
-		fatal("not implemented")
+		// extract()
 	case "t", "list":
-		list(*archive, cpr, verbose)
+		list()
 	}
 }

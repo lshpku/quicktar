@@ -11,14 +11,15 @@ import (
 	ctr "github.com/lshpku/quicktar"
 )
 
-func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append bool) {
+func create(append bool) {
 	// Open writer
 	var w *ctr.Writer
 	var err error
+	cpr := ctr.NewCipher(flagEnc, flagPwd)
 	if append {
-		w, err = ctr.OpenWriter(archive, cpr)
+		w, err = ctr.OpenWriter(*flagPath, cpr)
 	} else {
-		w, err = ctr.NewWriter(archive, cpr)
+		w, err = ctr.NewWriter(*flagPath, cpr)
 	}
 	if err != nil {
 		fatal(err.Error())
@@ -43,7 +44,7 @@ func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append
 			return nil
 		}
 
-		if verbose {
+		if flagVerbose {
 			name := path
 			if fi.IsDir() {
 				name += "/"
@@ -74,7 +75,7 @@ func create(archive string, cpr ctr.Cipher, verbose bool, files []string, append
 	}
 
 	// Traverse files
-	for _, root := range files {
+	for _, root := range flagFiles {
 		var fi fs.FileInfo
 		fi, err = os.Stat(root)
 		if err != nil {

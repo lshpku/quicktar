@@ -7,8 +7,9 @@ import (
 	ctr "github.com/lshpku/quicktar"
 )
 
-func list(archive string, cpr ctr.Cipher, verbose bool) {
-	r, err := ctr.OpenReader(archive, cpr)
+func list() {
+	cpr := ctr.NewCipher(flagEnc, flagPwd)
+	r, err := ctr.OpenReader(*flagPath, cpr)
 	if err != nil {
 		fatal(err.Error())
 	}
@@ -25,7 +26,7 @@ func list(archive string, cpr ctr.Cipher, verbose bool) {
 		if f.IsDir() {
 			name += "/"
 		}
-		if !verbose {
+		if !flagVerbose {
 			fmt.Println(name)
 			continue
 		}
