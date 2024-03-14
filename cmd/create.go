@@ -33,7 +33,8 @@ func create(append bool) {
 
 		// Filter file
 		mode := fi.Mode() & fs.ModeType
-		if mode != 0 && mode != fs.ModeDir {
+		if mode != 0 && mode != fs.ModeDir && mode != fs.ModeSymlink {
+			fmt.Fprintf(os.Stderr, "warning: unsupported file: %s\n", path)
 			return nil
 		}
 		baseName := ctr.BaseName(path)
@@ -59,18 +60,29 @@ func create(append bool) {
 		}
 		defer w.Close()
 
+		// 1. Directory
 		if fi.IsDir() {
 			return nil
 		}
 
-		// Copy content
+		// 2. Symlink
+		if mode == fs.ModeSymlink {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			if _, err := w.Write([]byte(link)); err != nil {
+				return err
+			}
+		}
+
+		// 3. Regular file
 		r, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		defer r.Close()
-
 		_, err = io.Copy(w, r)
+		r.Close()
 		return err
 	}
 

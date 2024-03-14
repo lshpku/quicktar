@@ -96,10 +96,10 @@ func readMeta(fd *os.File, cipher *Cipher, metaOff *int64) ([]*File, error) {
 		sec := binary.LittleEndian.Uint64(buf[24:])
 		files[i] = &File{
 			fileHeader: fileHeader{
-				offset:   int64(offset),
-				size:     int64(size),
-				mode:     fs.FileMode(mode),
-				modified: time.Unix(int64(sec), int64(nsec)),
+				offset:  int64(offset),
+				size:    int64(size),
+				mode:    fs.FileMode(mode),
+				modTime: time.Unix(int64(sec), int64(nsec)),
 			},
 		}
 		buf = buf[32:]
@@ -163,10 +163,10 @@ func readHeader(fd *os.File, cipher Cipher, metaOff *int64) ([]*File, error) {
 		sec := binary.LittleEndian.Uint64(buf[24:])
 		files[i] = &File{
 			fileHeader: fileHeader{
-				offset:   int64(offset),
-				size:     int64(size),
-				mode:     fs.FileMode(mode),
-				modified: time.Unix(int64(sec), int64(nsec)),
+				offset:  int64(offset),
+				size:    int64(size),
+				mode:    fs.FileMode(mode),
+				modTime: time.Unix(int64(sec), int64(nsec)),
 			},
 		}
 		buf = buf[32:]
@@ -207,16 +207,16 @@ type fileHeader struct {
 	// For writer, it's full name.
 	name string
 
-	offset   int64
-	size     int64
-	mode     fs.FileMode
-	modified time.Time
+	offset  int64
+	size    int64
+	mode    fs.FileMode
+	modTime time.Time
 }
 
 func (f *fileHeader) Name() string       { return f.name }
 func (f *fileHeader) Size() int64        { return f.size }
 func (f *fileHeader) Mode() fs.FileMode  { return f.mode }
-func (f *fileHeader) ModTime() time.Time { return f.modified }
+func (f *fileHeader) ModTime() time.Time { return f.modTime }
 func (f *fileHeader) IsDir() bool        { return f.Mode().IsDir() }
 func (f *fileHeader) Sys() any           { return nil }
 

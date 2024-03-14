@@ -85,28 +85,3 @@ func (c *Cipher) xorKeyStream(dst, src []byte, off int64) {
 	ctr := cipher.NewCTR(c.block, iv)
 	ctr.XORKeyStream(dst, src)
 }
-
-func BaseName(path string) string {
-	lastSlash := -1
-	for i, c := range path {
-		if c == '/' {
-			lastSlash = i
-		}
-	}
-	if lastSlash == -1 {
-		return path
-	}
-	return path[lastSlash+1:]
-}
-
-func Split(path string) []string {
-	list := make([]string, 0)
-	lastSlash := 0
-	for i, c := range path {
-		if c == '/' {
-			list = append(list, path[lastSlash:i])
-			lastSlash = i + 1
-		}
-	}
-	return append(list, path[lastSlash:])
-}

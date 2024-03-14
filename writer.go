@@ -100,10 +100,9 @@ func (w *Writer) Create(name string) (io.WriteCloser, error) {
 //  2. No leading or trailing '/', even for directories.
 //  3. For any level, an empty string, '.' or '..' is not allowed.
 //
-// Currently, only regular file, directory and soft link are supported.
-//
-// For directories, the returned file is already closed.
-func (w *Writer) CreateFile(name string, mode fs.FileMode, modified time.Time) (io.WriteCloser, error) {
+// This function doesn't check the file mode. User can write to the returned
+// file regardless of its mode.
+func (w *Writer) CreateFile(name string, mode fs.FileMode, modTime time.Time) (io.WriteCloser, error) {
 	// Check name
 	if name == "" {
 		return nil, errors.New("empty name")
@@ -129,12 +128,6 @@ func (w *Writer) CreateFile(name string, mode fs.FileMode, modified time.Time) (
 		}
 	}
 
-	// Check mode
-	modeType := mode & fs.ModeType
-	if modeType != 0 && modeType != fs.ModeDir {
-		return nil, errors.New("invalid mode type")
-	}
-
 	// Check existence
 	if _, ok := w.fileIndex[name]; ok {
 		return nil, fs.ErrExist
@@ -143,16 +136,12 @@ func (w *Writer) CreateFile(name string, mode fs.FileMode, modified time.Time) (
 	// Add file
 	f := &wfileDesc{
 		fileHeader: fileHeader{
-			name:     name,
-			mode:     mode,
-			modified: modified,
+			name:    name,
+			offset:  w.getPos(),
+			mode:    mode,
+			modTime: modTime,
 		},
 		writer: w,
-	}
-	if modeType == fs.ModeDir {
-		f.closed = true
-	} else {
-		f.offset = w.getPos()
 	}
 	w.fileIndex[name] = len(w.file)
 	w.file = append(w.file, &f.fileHeader)
@@ -169,8 +158,8 @@ func (w *Writer) Close() error {
 		binary.LittleEndian.PutUint64(buf, uint64(h.offset))
 		binary.LittleEndian.PutUint64(buf[8:], uint64(h.size))
 		binary.LittleEndian.PutUint32(buf[16:], uint32(h.mode))
-		binary.LittleEndian.PutUint32(buf[20:], uint32(h.modified.Nanosecond()))
-		binary.LittleEndian.PutUint64(buf[24:], uint64(h.modified.Unix()))
+		binary.LittleEndian.PutUint32(buf[20:], uint32(h.modTime.Nanosecond()))
+		binary.LittleEndian.PutUint64(buf[24:], uint64(h.modTime.Unix()))
 		if _, err := w.write(buf); err != nil {
 			return err
 		}
