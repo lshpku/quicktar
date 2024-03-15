@@ -21,11 +21,8 @@ func create(append bool) {
 	} else {
 		w, err = ctr.NewWriter(*flagPath, cpr)
 	}
-	if err != nil {
-		fatal(err.Error())
-	}
+	nilOrFatal(err)
 
-	// Define traversal function
 	visit := func(path string, fi fs.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -110,10 +107,6 @@ func create(append bool) {
 
 	// Close the file before raising any error, so that the archive is closed properly.
 	closeErr := w.Close()
-	if err != nil {
-		fatal(err.Error())
-	}
-	if closeErr != nil {
-		fatal(closeErr.Error())
-	}
+	nilOrFatal(err)
+	nilOrFatal(closeErr)
 }

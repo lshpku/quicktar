@@ -28,14 +28,20 @@ func printHelpAndExit() {
 }
 
 func fatalWithUsage(msg string) {
-	println(msg)
+	println("fatal:", msg)
 	println("Type '" + os.Args[0] + " -h' for more help.")
 	os.Exit(1)
 }
 
 func fatal(msg string) {
-	println(msg)
+	println("fatal:", msg)
 	os.Exit(1)
+}
+
+func nilOrFatal(err error) {
+	if err != nil {
+		fatal(err.Error())
+	}
 }
 
 var (
@@ -157,7 +163,7 @@ func main() {
 	case "a", "append":
 		create(true)
 	case "x", "extract":
-		// extract()
+		extract()
 	case "t", "list":
 		list()
 	}
