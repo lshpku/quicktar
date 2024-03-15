@@ -71,16 +71,22 @@ func create(append bool) {
 			if _, err := w.Write([]byte(link)); err != nil {
 				return err
 			}
+			return nil
 		}
 
 		// 3. Regular file
-		r, err := os.Open(path)
-		if err != nil {
+		if mode == 0 {
+			r, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(w, r)
+			r.Close()
 			return err
 		}
-		_, err = io.Copy(w, r)
-		r.Close()
-		return err
+
+		println("ignored:", path)
+		return nil
 	}
 
 	// Traverse files
