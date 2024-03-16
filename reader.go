@@ -12,30 +12,29 @@ import (
 // Reader represents an open archive for read.
 type Reader struct {
 	Cipher
-	File []*File
-	name string
+	File    []*File
+	name    string
+	fdCache *fdCache
 }
-
-var OpenFunc = os.Open
-var CloseFunc = func(f *os.File) error { return f.Close() }
 
 // OpenReader opens the archive for read.
 func OpenReader(name string, cipher Cipher) (*Reader, error) {
-	fd, err := OpenFunc(name)
+	fd, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	defer CloseFunc(fd)
 
 	files, err := readMeta(fd, &cipher, nil)
 	if err != nil {
+		fd.Close()
 		return nil, err
 	}
 
 	reader := &Reader{
-		Cipher: cipher,
-		File:   files,
-		name:   name,
+		Cipher:  cipher,
+		File:    files,
+		name:    name,
+		fdCache: newFdCache(fd),
 	}
 	return reader, nil
 }
@@ -189,13 +188,20 @@ func readHeader(fd *os.File, cipher Cipher, metaOff *int64) ([]*File, error) {
 	return files, nil
 }
 
+// Open opens the file for reading.
+//
+// User may open multiple files concurrently. If so, each file has its own fd.
 func (r *Reader) Open(f *File) (*FileDesc, error) {
-	fd, err := OpenFunc(r.name)
-	if err != nil {
-		return nil, err
+	fd := r.fdCache.acquire()
+	if fd == nil {
+		var err error
+		fd, err = os.Open(r.name)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &FileDesc{
-		Cipher: r.Cipher,
+		reader: r,
 		fd:     fd,
 		file:   f,
 		pos:    0,
@@ -232,10 +238,10 @@ func (f *File) FileInfo() fs.FileInfo {
 
 // FileDesc represents an open file for read.
 type FileDesc struct {
-	Cipher
-	fd   *os.File
-	file *File
-	pos  int64
+	reader *Reader
+	fd     *os.File
+	file   *File
+	pos    int64
 }
 
 func (f *FileDesc) Read(p []byte) (n int, err error) {
@@ -256,7 +262,7 @@ func (f *FileDesc) Read(p []byte) (n int, err error) {
 		return 0, err
 	}
 
-	f.xorKeyStream(buf, buf, s)
+	f.reader.xorKeyStream(buf, buf, s)
 	copy(p, buf[off%16:])
 	f.pos += int64(len(p))
 	return len(p), nil
@@ -282,9 +288,17 @@ func (f *FileDesc) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (f *FileDesc) Close() error {
-	return CloseFunc(f.fd)
+	return f.reader.fdCache.release(f.fd)
 }
 
 func (f *FileDesc) Stat() (fs.FileInfo, error) {
 	return f.file.FileInfo(), nil
+}
+
+func (r *Reader) SetFdCacheSize(size int) {
+	r.fdCache.size = size
+}
+
+func (r *Reader) SetFdCacheTimeout(timeout time.Duration) {
+	r.fdCache.timeout = timeout
 }
