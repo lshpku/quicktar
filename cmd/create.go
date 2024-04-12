@@ -15,11 +15,10 @@ func create(append bool) {
 	// Open writer
 	var w *ctr.Writer
 	var err error
-	cpr := ctr.NewCipher(flagEnc, flagPwd)
 	if append {
-		w, err = ctr.OpenWriter(*flagPath, cpr)
+		w, err = ctr.OpenWriter(*flagPath, ctr.NewCipher(flagEnc, flagPwd))
 	} else {
-		w, err = ctr.NewWriter(*flagPath, cpr)
+		w, err = ctr.NewWriter(*flagPath, ctr.NewCipherNonce(flagEnc, flagPwd, nil))
 	}
 	nilOrFatal(err)
 

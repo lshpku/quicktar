@@ -66,7 +66,7 @@ func NewCipher(enc int, pwd []byte) Cipher {
 	if isEncNone(enc) {
 		return Store
 	}
-	return NewCipherNonce(enc, pwd, nil)
+	return newCipher(enc, pwd, nil)
 }
 
 func (c *Cipher) xorKeyStream(dst, src []byte, off int64) {
