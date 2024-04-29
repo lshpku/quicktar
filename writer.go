@@ -26,7 +26,12 @@ func NewWriter(name string, cipher Cipher) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewWriterFile(f, cipher)
+}
 
+// NewWriterFile is like NewWriter but takes a file descriptor as the argument.
+// f must be an empty file with its pos seeked to zero.
+func NewWriterFile(f *os.File, cipher Cipher) (*Writer, error) {
 	// Write header
 	header := make([]byte, 32)
 	copy(header, []byte("QuickTar"))
@@ -34,7 +39,7 @@ func NewWriter(name string, cipher Cipher) (*Writer, error) {
 		binary.BigEndian.PutUint64(header[16:], cipher.nonce[0])
 		binary.BigEndian.PutUint64(header[24:], cipher.nonce[1])
 	}
-	if _, err = f.Write(header); err != nil {
+	if _, err := f.Write(header); err != nil {
 		return nil, err
 	}
 

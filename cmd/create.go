@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -18,7 +19,19 @@ func create(append bool) {
 	if append {
 		w, err = ctr.OpenWriter(*flagPath, ctr.NewCipher(flagEnc, flagPwd))
 	} else {
-		w, err = ctr.NewWriter(*flagPath, ctr.NewCipherNonce(flagEnc, flagPwd, nil))
+		f, err := os.OpenFile(*flagPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
+		if errors.Is(err, os.ErrExist) {
+			fmt.Fprintf(os.Stderr, "overwrite %s? (y/n [n]) ", *flagPath)
+			b := make([]byte, 16)
+			n, _ := os.Stdin.Read(b)
+			if n == 0 || b[0] != 'y' {
+				println("aborted")
+				return
+			}
+			f, err = os.Create(*flagPath)
+		}
+		nilOrFatal(err)
+		w, err = ctr.NewWriterFile(f, ctr.NewCipherNonce(flagEnc, flagPwd, nil))
 	}
 	nilOrFatal(err)
 
