@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	flagAddr = flag.String("addr", ":20080", "Specify address")
+	flagAddr = flag.String("addr", "127.0.0.1:8080", "Specify listen address")
 	flagPwd  = flag.String("pwd", "", "Specify password")
 	flagEnc  = flag.Int("enc", 0, "Specify encryption level")
 )

@@ -5,10 +5,12 @@ import time
 import base64
 import hashlib
 import argparse
+import platform
+import tempfile
 import threading
 from html import unescape
 from urllib.parse import urljoin, urlparse
-from subprocess import Popen, DEVNULL, PIPE
+from subprocess import Popen, run, DEVNULL, PIPE
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from http.client import HTTPConnection
 
@@ -21,14 +23,20 @@ ALPHA_FILTER = ('format=rgba,geq='
                 r'r=alpha(X\,Y)/255*r(X\,Y)+255-alpha(X\,Y):'
                 r'g=alpha(X\,Y)/255*g(X\,Y)+255-alpha(X\,Y):'
                 r'b=alpha(X\,Y)/255*b(X\,Y)+255-alpha(X\,Y)')
+IGNORE_EXT = set('''
+    bc%21 txt torrent srt downloading nfo zip rar ini
+'''.split())
+
+SYSTEM = platform.system()
+with open('index.html', 'rb') as f:
+    INDEX_PAGE = f.read()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--host', default='127.0.0.1')
 parser.add_argument('port', nargs='?', type=int, default=8000)
 parser.add_argument('--to', default='http://127.0.0.1:8080')
-parser.add_argument('--cache', default='webdav_proxy.cache')
-parser.add_argument('-j', '--workers', type=int, default=4)
-parser.add_argument('-p', '--password')
+parser.add_argument('-j', '--workers', type=int, default=4,
+                    help='Specify number of ffmpeg workers')
 
 
 class TaskQueue:
@@ -219,16 +227,13 @@ def generate_thumbnail(url, tmpfile):
 
 def generate_thumbnail_thread():
     import traceback
-    uid = base64.urlsafe_b64encode(os.urandom(15))
-    tmpfile = '/tmp/webdav_proxy-' + uid.decode() + '.bmp'
-    IGNORE_EXT = set('''
-        bc%21 txt torrent srt downloading nfo zip rar ini
-    '''.split())
+    tid = base64.urlsafe_b64encode(os.urandom(15)).decode()
+    tmp = os.path.join(tempfile.gettempdir(), f'webdav-{tid}.bmp')
 
     while path := task_queue.get():
         url = urljoin(args.to, path)
         try:
-            data = generate_thumbnail(url, tmpfile)
+            data = generate_thumbnail(url, tmp)
         except Exception:
             ext = url.rfind('.') + 1
             if ext and url[ext:].lower() not in IGNORE_EXT:
@@ -236,7 +241,7 @@ def generate_thumbnail_thread():
                 with open('error.log', 'a') as f:
                     f.write(url + '\n' + exc + '\n')
             data = -1
-        uid = hashlib.sha256(password + path.encode()).digest()
+        uid = hashlib.sha256(instance_id + path.encode()).digest()
         db[uid] = data
         task_queue.done(path)  # must call done after updating db
 
@@ -262,19 +267,28 @@ def convert_picture(url, png=False, alpha=False):
     return bytes(data)
 
 
+def open_host_video(url):
+    if SYSTEM == 'Windows':
+        cmd = ['C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe', url]
+        Popen(cmd)
+    elif SYSTEM == 'Darwin':
+        cmd = ['open', '-a', '/Applications/IINA.app', url]
+        run(cmd, check=True)
+    else:
+        raise NotImplementedError(f'unsupported system: {SYSTEM}')
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
         # Serve index
         if self.path == '/':
-            with open('webdav_proxy_index.html', 'rb') as f:
-                data = f.read()
             self.send_response(200)
-            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Content-Length', str(len(INDEX_PAGE)))
             self.send_header('Content-Type', 'text/html')
             self.end_headers()
-            self.wfile.write(data)
+            self.wfile.write(INDEX_PAGE)
             return
 
         # Serve dir
@@ -290,8 +304,7 @@ class Handler(BaseHTTPRequestHandler):
         # Open videos in local player
         if self.path.startswith('/open/'):
             url = urljoin(args.to, self.path[5:])
-            p = Popen(['open', '-a', '/Applications/IINA.app', url])
-            if p.wait():
+            if open_host_video(url):
                 self.send_error(500)
                 return
             self.send_response(200)
@@ -348,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
         for fn in files:
             del fn['p']
             fp = dirname + '/' + fn['name']
-            uid = hashlib.sha256(password + fp.encode()).digest()
+            uid = hashlib.sha256(instance_id + fp.encode()).digest()
             if (meta := db.get(uid)) is None:
                 unprocessed_files.append(fp)
             elif meta == -1:
@@ -398,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def serve_pic(self, path):
-        uid = hashlib.sha256(password + path.encode()).digest()
+        uid = hashlib.sha256(instance_id + path.encode()).digest()
         if (meta := db.get(uid)) is None:
             self.send_error(404)
             return
@@ -445,7 +458,7 @@ def expand_small_dirs(root):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    password = os.urandom(32)
+    instance_id = os.urandom(32)
     db = {}  # uid: data
     converted_pics = {}  # uid: data
 
