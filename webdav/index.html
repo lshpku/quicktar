@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+        body {
+            margin: 0;
+            font-family:
+                "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
+                "Heiti SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+        }
+
+        h1 {
+            margin: 0;
+        }
+
+        .header-bar {
+            position: fixed;
+            width: 100%;
+            height: 3rem;
+            background-color: white;
+        }
+
+        .dir-name {
+            position: absolute;
+            top: 50%;
+            transform: translate(0, -50%);
+            left: 25%;
+            right: 25%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .parent-dir {
+            position: absolute;
+            top: 50%;
+            transform: translate(0, -50%);
+            margin-left: 1rem;
+            max-width: calc(25% - 1rem);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 1.1rem;
+            color: #3b82f6;
+            cursor: pointer;
+        }
+
+        .header-bar-shadowed {
+            box-shadow: 0px 0px 3px rgba(0, 0, 0, .4);
+        }
+
+        .inner-body {
+            padding: 8px;
+        }
+
+        .dir-name-sec {
+            padding: 0 6px;
+            cursor: pointer;
+            word-wrap: break-word;
+            word-break: break-all;
+        }
+
+        .file-grid {
+            margin-top: 3rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-evenly;
+        }
+
+        .file-box {
+            width: 100px;
+            margin: 10px;
+        }
+
+        .file-thumb {
+            width: 100px;
+            height: 92px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .file-thumb img {
+            max-width: 100%;
+            max-height: 100%;
+            cursor: pointer;
+        }
+
+        .square-image {
+            object-fit: cover;
+            overflow: hidden;
+        }
+
+        .bordered-image {
+            border: .7px solid #b2b2b2;
+            outline: 2.3px solid white;
+            box-shadow: 0px 2px 2.5px 2.3px rgba(0, 0, 0, .3);
+            margin: 2.3px;
+        }
+
+        .file-name {
+            display: -webkit-box;
+            font-size: 14px;
+            word-wrap: break-word;
+            word-break: break-all;
+            text-align: center;
+            max-height: 60px;
+            overflow: hidden;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+        }
+
+        .file-duration {
+            font-size: 12px;
+            color: #3b82f6;
+            text-align: center;
+        }
+
+        .front-box {
+            background: rgba(0, 0, 0, .5);
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .front-image {
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="header-bar" class="header-bar">
+        <div id="dir-name" class="dir-name">Hello W</div>
+        <div id="parent-dir" class="parent-dir"></div>
+    </div>
+    <div id="front-box" class="front-box"></div>
+    <div id="inner-body" class="inner-body">
+        <div id="file-list" class="file-grid"></div>
+    </div>
+    <script type="text/javascript">
+        const frontBox = document.getElementById("front-box");
+        const dirNameDiv = document.getElementById("dir-name");
+        const parentDir = document.getElementById("parent-dir");
+        const fileListDiv = document.getElementById("file-list");
+        const headerBar = document.getElementById("header-bar");
+        const innerBody = document.getElementById("inner-body");
+        let frontImageIndex = null;
+
+        function getBoxShape() {
+            let box = fileListDiv.firstChild;
+            let style = window.getComputedStyle(box);
+            return [parseInt(style.width), parseInt(style.margin)];
+        }
+
+        function resetBoxMargin() {
+            let numBoxes = fileListDiv.childElementCount;
+            if (numBoxes == 0) return;
+            let [boxWidth, boxMargin] = getBoxShape();
+            let totalWidth = boxWidth + boxMargin * 2;
+            let windowWidth = fileListDiv.clientWidth;
+            let numCols = Math.max(Math.floor(windowWidth / totalWidth), 1);
+            let numRows = Math.ceil(fileListDiv.childElementCount / numCols);
+            let numEmpty = numCols * numRows - numBoxes;
+            if (numEmpty == 0) {
+                fileListDiv.lastChild.style.marginRight = null;
+                return;
+            }
+            let spaceWidth = (windowWidth - numCols * totalWidth) / (numCols + 1);
+            let margin = (spaceWidth + totalWidth) * numEmpty + boxMargin;
+            margin = Math.floor(margin * 100) / 100;
+            fileListDiv.lastChild.style.marginRight = margin + "px";
+        }
+
+        function openFile(index) {
+            let div = fileListDiv.children[index].firstChild;
+            if (!div.dataset.duration) {
+                if (!confirm('打开文件？')) {
+                    return;
+                }
+            }
+            let path = div.dataset.path;
+            console.log("Openning", decodeURIComponent(path));
+            fetch('open' + path).then(response => {
+                if (!response.ok) {
+                    throw new Error(response.status);
+                }
+            })
+        }
+
+        function keydownHanlder(e) {
+            if (e.keyCode == 38 || e.keyCode == 40) { // up, down
+                e.preventDefault();
+            } else if (e.keyCode == 39) { // right
+                for (var i = frontImageIndex + 1; i < fileListDiv.childElementCount; i++) {
+                    if (openPic(i)) break;
+                }
+            } else if (e.keyCode == 37) { // left
+                for (var i = frontImageIndex - 1; i >= 0; i--) {
+                    if (openPic(i)) break;
+                }
+            } else if (e.keyCode == 32) { // space
+                e.preventDefault();
+                closePic();
+            }
+        }
+
+        function openPic(index) {
+            let div = fileListDiv.children[index].firstChild;
+            if (!div.dataset.ispic) {
+                return false;
+            }
+            let path = div.dataset.path;
+            console.log("Showing", decodeURIComponent(path));
+            let img = document.createElement('img');
+            img.className = "front-image";
+            img.src = "openpic" + path;
+            frontBox.replaceChildren(img);
+            frontBox.style.display = "flex";
+            frontImageIndex = index;
+            document.onkeydown = keydownHanlder;
+            return true;
+        }
+
+        function closePic() {
+            frontBox.style.display = "none";
+            frontBox.replaceChildren();
+            document.onkeydown = null;
+        }
+
+        frontBox.onclick = closePic;
+
+        function createFileImg(path, uid) {
+            let img = document.createElement('img');
+            if (path.endsWith('/')) {
+                img.src = 'static/directory-icon.png';
+                img.style.width = "80px";
+                img.style.height = "80px";
+            } else if (uid) {
+                img.className = "bordered-image";
+                img.src = 'img/' + uid;
+            } else if (uid == '') {
+                img.src = 'static/unknown-format.png';
+            } else {
+                img.src = 'static/file-loading.png';
+                img.style.width = "60px";
+                img.style.height = "60px";
+            }
+            return img;
+        }
+
+        function padTo2(a) {
+            if (('' + a).length >= 2) {
+                return a;
+            }
+            return '0' + a;
+        }
+
+        function addDuration(box, duration) {
+            if (box.childElementCount == 3) {
+                return;
+            }
+            if (duration == undefined) {
+                return;
+            }
+            box.firstChild.dataset.duration = duration;
+            duration = Math.floor(duration);
+            let text = '' + duration % 60;
+            if (text.length == 1) {
+                text = '0' + text;
+            }
+            duration = Math.floor(duration / 60);
+            if (duration >= 60) {
+                text = duration % 60 + ':' + text;
+                if (text.length == 4) {
+                    text = '0' + text;
+                }
+                duration = Math.floor(duration / 60);
+            }
+            text = duration + ':' + text;
+            let durDiv = document.createElement('div');
+            durDiv.className = "file-duration";
+            durDiv.innerText = text;
+            box.appendChild(durDiv);
+        }
+
+        function addFile(buffer, path, meta) {
+            let imgDiv = document.createElement('div');
+            imgDiv.className = 'file-thumb';
+            imgDiv.dataset.path = path;
+            if (meta.ispic) {
+                imgDiv.dataset.ispic = true;
+            }
+            if (path.endsWith("/")) {
+                imgDiv.onclick = () => {
+                    openFolder(path);
+                };
+            } else {
+                let index = buffer.length;
+                imgDiv.onclick = () => {
+                    if (imgDiv.dataset.ispic) {
+                        openPic(index);
+                    } else {
+                        openFile(index);
+                    }
+                };
+            }
+
+            imgDiv.appendChild(createFileImg(path, meta.img));
+
+            let nameDiv = document.createElement('div');
+            nameDiv.className = "file-name";
+            let name = meta.name;
+            if (name.endsWith('/')) {
+                name = name.substring(0, name.length - 1);
+            }
+            nameDiv.innerText = decodeURIComponent(name);
+
+            let box = document.createElement('div');
+            box.className = 'file-box';
+            box.appendChild(imgDiv);
+            box.appendChild(nameDiv);
+            addDuration(box, meta.duration);
+            buffer.push(box);
+        }
+
+        function getLastLevelName(path) {
+            if (path.endsWith('/')) {
+                path = path.substring(0, path.length - 1);
+            }
+            return path.substring(path.lastIndexOf('/') + 1);
+        }
+
+        var folderInstanceId = 0;
+
+        async function openFolder(path) {
+            let instanceId = ++folderInstanceId;
+
+            // Save current scroll
+            let oldPath = sessionStorage.getItem('currentPath');
+            if (oldPath != null) {
+                let scrollKey = "_S" + oldPath.length + oldPath;
+                sessionStorage.setItem(scrollKey, document.documentElement.scrollTop);
+            }
+            sessionStorage.setItem('currentPath', path);
+
+            // Set header
+            let pathBase = path.substring(0, path.length - 1);
+            let lastSlash = pathBase.lastIndexOf('/');
+            if (lastSlash == -1) {
+                parentDir.innerHTML = "";
+                parentDir.onclick = null;
+                dirNameDiv.innerText = decodeURIComponent(pathBase);
+            } else {
+                let dirname = pathBase.substring(0, lastSlash);
+                let basename = pathBase.substring(lastSlash + 1);
+                dirNameDiv.innerText = decodeURIComponent(basename);
+                let parentName = dirname.substring(dirname.lastIndexOf('/') + 1);
+                if (parentName == '') {
+                    parentName = "/";
+                }
+                parentDir.innerText = decodeURIComponent(parentName);
+                parentDir.onclick = () => {
+                    openFolder(dirname + '/');
+                }
+            }
+
+            // Fetch file list
+            let fileList = [];
+            console.log("Fetching", decodeURIComponent(path), '[' + instanceId + ']');
+            fetch('dir' + path).then(response => {
+                if (!response.ok) {
+                    throw new Error(response.status);
+                }
+                return response.json();
+            }).then(files => {
+                let complete = true;
+                for (let i = 0; i < files.length; i++) {
+                    let img = files[i].img;
+                    let name = files[i].name;
+                    addFile(fileList, path + name, files[i]);
+                    if (!name.endsWith('/') && img == null) {
+                        complete = false;
+                    }
+                }
+                fileListDiv.replaceChildren(...fileList);
+                resetBoxMargin();
+                if (!complete) {
+                    setTimeout(updateFilelist, 100, path, instanceId);
+                }
+            }).catch(err => {
+                fileListDiv.innerText = err;
+                throw err;
+            });
+        }
+
+        function updateFilelist(path, instanceId) {
+            if (instanceId != folderInstanceId) {
+                return;
+            }
+            console.log("Updating", decodeURIComponent(path), '[' + instanceId + ']');
+            fetch('dir' + path).then(response => {
+                if (!response.ok) {
+                    throw new Error(response.status);
+                }
+                return response.json();
+            }).then(files => {
+                if (instanceId != folderInstanceId) {
+                    return;
+                }
+                let complete = true;
+                for (let i = 0; i < files.length; i++) {
+                    let filePath = path + files[i].name;
+                    let img = files[i].img;
+                    if (!filePath.endsWith('/') && img == null) {
+                        complete = false;
+                    }
+                    let box = fileListDiv.children[i];
+                    let div = box.firstChild;
+                    let oldImg = div.firstChild;
+                    let newImg = createFileImg(filePath, img);
+                    if (oldImg.src != newImg.src) {
+                        div.replaceChildren(newImg);
+                        if (files[i].ispic) {
+                            div.dataset.ispic = true;
+                        }
+                        addDuration(box, files[i].duration);
+                    }
+                }
+                if (!complete) {
+                    setTimeout(updateFilelist, 100, path, instanceId);
+                }
+            }).catch(err => {
+                if (instanceId != folderInstanceId) {
+                    return;
+                }
+                fileListDiv.innerText = err;
+                throw err;
+            });
+        }
+
+        function handleScroll() {
+            if (document.documentElement.scrollTop == 0) {
+                headerBar.classList.remove("header-bar-shadowed");
+            } else {
+                headerBar.classList.add("header-bar-shadowed");
+            }
+        }
+
+        window.onload = () => {
+            document.onscroll = handleScroll;
+            let currentPath = sessionStorage.getItem('currentPath');
+            if (currentPath) {
+                sessionStorage.removeItem('currentPath');
+            } else {
+                currentPath = '/';
+            }
+            openFolder(currentPath);
+        };
+
+        window.onresize = () => {
+            resetBoxMargin();
+        };
+    </script>
+</body>
+
+</html>
