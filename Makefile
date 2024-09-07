@@ -1,21 +1,22 @@
-
 ifdef RELEASE
 LDFLAGS += -ldflags "-s -w"
 endif
 
-target := cmd/main webdav/main
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+GOEXT :=
 
-all: $(target)
+ifeq ($(GOOS), windows)
+GOEXT := .exe
+endif
 
-cmd/main: *.go cmd/*.go
-	go build $(LDFLAGS) -o $@ cmd/*.go
+all: bin/main-$(GOOS)-$(GOARCH)$(GOEXT) bin/webdav-$(GOOS)-$(GOARCH)$(GOEXT)
 
-webdav/main: *.go webdav/*.go
-	go build $(LDFLAGS) -o $@ webdav/*.go
+bin/main-$(GOOS)-$(GOARCH)$(GOEXT): *.go cmd/*.go
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build $(LDFLAGS) -o $@ ./cmd
 
-install: $(target)
-	cp cmd/main ~/bin/qct-cmd
-	cp webdav/main ~/bin/qct-webdav
+bin/webdav-$(GOOS)-$(GOARCH)$(GOEXT): *.go webdav/*.go
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build $(LDFLAGS) -o $@ ./webdav
 
 clean:
-	rm -f $(target)
+	rm -rf bin
