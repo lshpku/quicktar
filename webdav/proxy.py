@@ -3,6 +3,7 @@ import re
 import json
 import time
 import base64
+import pickle
 import hashlib
 import argparse
 import platform
@@ -35,8 +36,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--host', default='127.0.0.1')
 parser.add_argument('port', nargs='?', type=int, default=8000)
 parser.add_argument('--to', default='http://127.0.0.1:8080')
-parser.add_argument('-j', '--workers', type=int, default=4,
+parser.add_argument('-j', '--workers', type=int, default=8,
                     help='Specify number of ffmpeg workers')
+parser.add_argument('-c', '--cache-dir', default='cache')
 
 
 class TaskQueue:
@@ -111,6 +113,43 @@ class TaskQueue:
             self.cond.notify_all()
 
 
+class FileDatabase:
+
+    def __init__(self, base_dir='wdproxy'):
+        self._base_dir = base_dir
+        self._mem_cache = {}
+
+    def __setitem__(self, key, value):
+        self._mem_cache[key] = value
+        f = tempfile.NamedTemporaryFile(delete=False)
+        pickle.dump(value, f)
+        f.close()
+        path = self._form_path(key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.replace(f.name, path)
+
+    def get(self, key, mem_only=False):
+        if (value := self._mem_cache.get(key)) is not None:
+            return value
+        if mem_only:
+            return None
+        path = self._form_path(key)
+        try:
+            with open(path, 'rb') as f:
+                value = pickle.load(f)
+        except FileNotFoundError:
+            return None
+        self._mem_cache[key] = value
+        return value
+
+    def _form_path(self, key):
+        if isinstance(key, str):
+            key = key.encode()
+        uid = hashlib.sha256(key).hexdigest()
+        a, b, c, d = uid[:2], uid[2:4], uid[4:6], uid[6:]
+        return os.path.join(self._base_dir, a, b, c, d)
+
+
 def take_snapshot(url, tmpfile, ss=None, vf=None):
     cmd = 'ffmpeg -hide_banner -threads 1'.split()
     if ss is not None:
@@ -129,7 +168,7 @@ def take_snapshot(url, tmpfile, ss=None, vf=None):
     p.wait()  # check output file instead of return value
 
     has_output = False
-    for line in data.decode().splitlines():
+    for line in data.decode(errors='ignore').splitlines():
         if has_output:
             if line.startswith('  Stream #0:0: Video: bmp'):
                 if m := re.search(r'(\d+)x(\d+)', line):
@@ -231,6 +270,11 @@ def generate_thumbnail_thread():
     tmp = os.path.join(tempfile.gettempdir(), f'webdav-{tid}.bmp')
 
     while path := task_queue.get():
+        uid = hashlib.sha256(instance_id + path.encode()).digest()
+        if db.get(uid) is not None:
+            print('hitcache:', path)
+            task_queue.done(path)
+            continue
         url = urljoin(args.to, path)
         try:
             data = generate_thumbnail(url, tmp)
@@ -241,7 +285,6 @@ def generate_thumbnail_thread():
                 with open('error.log', 'a') as f:
                     f.write(url + '\n' + exc + '\n')
             data = -1
-        uid = hashlib.sha256(instance_id + path.encode()).digest()
         db[uid] = data
         task_queue.done(path)  # must call done after updating db
 
@@ -362,15 +405,15 @@ class Handler(BaseHTTPRequestHandler):
             del fn['p']
             fp = dirname + '/' + fn['name']
             uid = hashlib.sha256(instance_id + fp.encode()).digest()
-            if (meta := db.get(uid)) is None:
+            if (data := db.get(uid, mem_only=True)) is None:
                 unprocessed_files.append(fp)
-            elif meta == -1:
+            elif data == -1:
                 fn['img'] = ''
             else:
                 fn['img'] = base64.urlsafe_b64encode(uid)[:-1].decode()
-                if meta['duration'] is not None:
-                    fn['duration'] = meta['duration']
-                if meta['codec_name'] in IMAGE_CODEC_NAMES:
+                if data['duration'] is not None:
+                    fn['duration'] = data['duration']
+                if data['codec_name'] in IMAGE_CODEC_NAMES:
                     fn['ispic'] = True
         task_queue.putmany(reversed(unprocessed_files))
         t2 = time.time()
@@ -458,8 +501,11 @@ def expand_small_dirs(root):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    instance_id = os.urandom(32)
-    db = {}  # uid: data
+    db = FileDatabase()  # uid: data
+    if (instance_id := db.get('instance_id')) is None:
+        instance_id = os.urandom(32)
+        db['instance_id'] = instance_id
+    print('using instance_id:', instance_id.hex())
     converted_pics = {}  # uid: data
 
     # Request WebDAV server
