@@ -4,6 +4,7 @@ import json
 import time
 import base64
 import pickle
+import socket
 import hashlib
 import argparse
 import platform
@@ -35,7 +36,7 @@ with open('index.html', 'rb') as f:
 parser = argparse.ArgumentParser()
 parser.add_argument('--host', default='127.0.0.1')
 parser.add_argument('port', nargs='?', type=int, default=8000)
-parser.add_argument('--to', default='http://127.0.0.1:8080')
+parser.add_argument('--to', action='append')
 parser.add_argument('-j', '--workers', type=int, default=8,
                     help='Specify number of ffmpeg workers')
 parser.add_argument('-c', '--cache-dir', default='cache')
@@ -146,8 +147,8 @@ class FileDatabase:
         if isinstance(key, str):
             key = key.encode()
         uid = hashlib.sha256(key).hexdigest()
-        a, b, c, d = uid[:2], uid[2:4], uid[4:6], uid[6:]
-        return os.path.join(self._base_dir, a, b, c, d)
+        a, b = uid[:2], uid[2:]
+        return os.path.join(self._base_dir, a, b)
 
 
 def take_snapshot(url, tmpfile, ss=None, vf=None):
@@ -272,10 +273,9 @@ def generate_thumbnail_thread():
     while path := task_queue.get():
         uid = hashlib.sha256(instance_id + path.encode()).digest()
         if db.get(uid) is not None:
-            print('hitcache:', path)
             task_queue.done(path)
             continue
-        url = urljoin(args.to, path)
+        url = urljoin(get_addr(path), path)
         try:
             data = generate_thumbnail(url, tmp)
         except Exception:
@@ -321,8 +321,73 @@ def open_host_video(url):
         raise NotImplementedError(f'unsupported system: {SYSTEM}')
 
 
+def relay(src: socket.socket, dst: socket.socket):
+    try:
+        while data := src.recv(65536):
+            dst.sendall(data)
+    except OSError:
+        pass
+    finally:
+        for s in (src, dst):
+            try:
+                s.close()
+            except OSError:
+                pass
+
+
+def get_addr(path: str):
+    assert path.startswith('/'), f'invalid path: {path}'
+    items = path.split('/', maxsplit=2)
+    return addr_map[items[1]]
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def parse_request(self):
+        requestline = str(self.raw_requestline, 'iso-8859-1')
+        requestline = requestline.rstrip('\r\n')
+        words = requestline.split()
+
+        if not (
+            len(words) == 3 and words[0] == 'GET' and
+            not self.is_get_path(path := words[1])
+        ):
+            return super().parse_request()
+
+        self.requestline = requestline
+        self.log_request(200)
+        client_sock = self.rfile.raw._sock
+        assert client_sock is self.wfile._sock
+
+        try:
+            addr = get_addr(path)
+        except KeyError:
+            return
+
+        url = urlparse(addr)
+        remote_sock = socket.create_connection((url.hostname, url.port))
+
+        remote_sock.sendall(self.raw_requestline)
+        remote_sock.sendall(self.rfile.peek())
+
+        threading.Thread(
+            target=relay, args=(client_sock, remote_sock), daemon=True
+        ).start()
+        relay(remote_sock, client_sock)
+
+        return False
+
+    @staticmethod
+    def is_get_path(path: str):
+        return (
+            path == '/' or
+            path.startswith('/dir/') or
+            path.startswith('/img/') or
+            path.startswith('/open/') or
+            path.startswith('/openpic/') or
+            path.startswith('/static/')
+        )
 
     def do_GET(self):
         # Serve index
@@ -346,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # Open videos in local player
         if self.path.startswith('/open/'):
-            url = urljoin(args.to, self.path[5:])
+            url = f'http://{args.host}:{args.port}/{self.path[6:]}'
             if open_host_video(url):
                 self.send_error(500)
                 return
@@ -390,10 +455,10 @@ class Handler(BaseHTTPRequestHandler):
         dirs, files = [], []
         for fn, fd in cur.items():
             p = (fn.lower(), fn)
-            if isinstance(fd, int):
-                files.append({'name': fn, 'p': p, 'size': fd})
-            else:
+            if isinstance(fd, dict):
                 dirs.append({'name': fn + '/', 'p': p})
+            else:
+                files.append({'name': fn, 'p': p, 'size': fd})
 
         dirs.sort(key=lambda p: p['p'])
         files.sort(key=lambda p: p['p'])
@@ -465,7 +530,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if (data := converted_pics.get(uid)) is None:
             try:
-                data = convert_picture(urljoin(args.to, path), png)
+                data = convert_picture(urljoin(get_addr(path), path), png)
             except RuntimeError:
                 data = ''
             converted_pics[uid] = data
@@ -508,34 +573,37 @@ if __name__ == "__main__":
     print('using instance_id:', instance_id.hex())
     converted_pics = {}  # uid: data
 
-    # Request WebDAV server
-    print('requesting WebDAV server')
-    conn = HTTPConnection(urlparse(args.to).netloc)
-    conn.request("PROPFIND", '/')
-    resp = conn.getresponse()
-    assert resp.status == 207
-    resp = resp.read().decode()
-
-    # Build file tree
-    print('building file tree')
     root = {}  # dir -> {}, file -> size
-    file_urls = []
-    hrefs = RE_HREF.findall(resp)
-    clens = iter(RE_CLEN.findall(resp))
-    for p in hrefs:
-        if p == '/':
-            continue
-        p = unescape(p)
-        cur = root
-        folders = p.split('/')
-        for fn in folders[1:-1]:
-            cur = cur.setdefault(fn, {})
-        if fn := folders[-1]:  # file
-            file_urls.append(urljoin(args.to, p))
-            cur[fn] = int(next(clens))
-    assert next(clens, None) is None
+    addr_map = {}  # first_level_path -> addr
 
-    # Expand small directories
+    for addr in args.to:
+        # Request WebDAV server
+        print('requesting server:', addr)
+        conn = HTTPConnection(urlparse(addr).netloc)
+        conn.request("PROPFIND", '/')
+        resp = conn.getresponse()
+        assert resp.status == 207
+        resp = resp.read().decode()
+
+        # Build file tree
+        hrefs = RE_HREF.findall(resp)
+        clens = iter(RE_CLEN.findall(resp))
+        for p in hrefs:
+            p = unescape(p)
+            cur = root
+            folders = p.split('/')
+            for fn in folders[1:-1]:
+                cur = cur.setdefault(fn, {})
+            if fn := folders[-1]:  # file
+                cur[fn] = int(next(clens))
+            if first_level := folders[1]:
+                assert addr_map.setdefault(first_level, addr) == addr, (
+                    f'Conflicting addr for path: {first_level}: '
+                    f'{addr_map[first_level]} and {addr}'
+                )
+        assert next(clens, None) is None
+
+    print('Done building file tree')
     expand_small_dirs(root)
 
     # Start ffmpeg worker threads
